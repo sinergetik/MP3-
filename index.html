@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Advanced 3D Audio DSP</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: { colors: { gray: { 850: '#1f2937', 900: '#111827', 950: '#030712' } } }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            -webkit-tap-highlight-color: transparent;
+            background-color: #030712;
+            color: #f3f4f6;
+        }
+        
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+            margin: 15px 0;
+        }
+        input[type=range]:focus { outline: none; }
+        
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 32px;
+            width: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            margin-top: -14px;
+            background: #3b82f6;
+            border: 3px solid #111827;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
+            transition: transform 0.1s;
+        }
+        input[type=range]:active::-webkit-slider-thumb {
+            transform: scale(1.15);
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 6px;
+            cursor: pointer;
+            background: #374151;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 flex flex-col items-center justify-start md:justify-center">
+
+    <div class="max-w-md w-full space-y-6 pb-12 mt-4 md:mt-0">
+        
+        <div class="text-center space-y-2">
+            <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-500">
+                Smooth DSP Audio
+            </h1>
+            <p class="text-gray-400 text-sm">Плавная настройка сцены и 3D-позиционирования</p>
+        </div>
+
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-2xl space-y-6">
+            
+            <!-- Визуализатор сцены (Радар) -->
+            <div class="relative w-full aspect-square max-w-[220px] mx-auto bg-gray-850 rounded-full border-4 border-gray-800 overflow-hidden shadow-[inset_0_0_20px_rgba(0,0,0,0.5)] flex items-center justify-center mt-2 mb-6">
+                <!-- Сетка/Оси -->
+                <div class="absolute w-full h-[1px] bg-gray-700/50"></div>
+                <div class="absolute h-full w-[1px] bg-gray-700/50"></div>
+                <!-- Круги отдаления -->
+                <div class="absolute w-[50%] h-[50%] rounded-full border border-gray-700/30"></div>
+                <div class="absolute w-[75%] h-[75%] rounded-full border border-gray-700/30"></div>
+                
+                <!-- Слушатель (Центр/Голова) -->
+                <div class="absolute w-7 h-7 bg-gray-400 rounded-full z-10 shadow-lg flex items-center justify-center overflow-hidden">
+                    <div class="w-4 h-2 bg-gray-800 rounded-t-full absolute top-1"></div>
+                    <div class="w-1 h-2 bg-blue-400 absolute left-0 rounded-r-full"></div>
+                    <div class="w-1 h-2 bg-red-400 absolute right-0 rounded-l-full"></div>
+                </div>
+
+                <!-- Источник звука (Пульсирующая точка) -->
+                <div id="sound-source" class="absolute w-4 h-4 bg-blue-500 rounded-full z-20 shadow-[0_0_15px_#3b82f6] transition-transform duration-75 origin-center" style="transform: translate(0px, 0px) scale(1);"></div>
+            </div>
+
+            <!-- 1. Баланс -->
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    <span>L (Лево)</span>
+                    <span class="text-white font-mono" id="val-balance">0</span>
+                    <span>R (Право)</span>
+                </div>
+                <div class="text-[10px] text-gray-500 text-center mb-1">Баланс громкости (Stereo Panner)</div>
+                <input type="range" id="slider-balance" min="-100" max="100" value="0">
+            </div>
+
+            <!-- 2. Сцена L-R (Задержка) -->
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    <span>Слева</span>
+                    <span class="text-white font-mono" id="val-scene">0</span>
+                    <span>Справа</span>
+                </div>
+                <div class="text-[10px] text-gray-500 text-center mb-1">Сдвиг сцены микрозадержками (до 5мс)</div>
+                <input type="range" id="slider-scene" min="-100" max="100" value="0">
+            </div>
+
+            <!-- 3. Вниз - Вверх -->
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    <span>Вниз (-10)</span>
+                    <span class="text-white font-mono" id="val-y">0</span>
+                    <span>Вверх (+10)</span>
+                </div>
+                <div class="text-[10px] text-gray-500 text-center mb-1">Положение по высоте (HRTF Y-axis)</div>
+                <input type="range" id="slider-y" min="-100" max="100" value="0">
+            </div>
+
+            <!-- 4. Вперед - Назад -->
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    <span>Вперед (-10)</span>
+                    <span class="text-white font-mono" id="val-z">0</span>
+                    <span>Назад (+10)</span>
+                </div>
+                <div class="text-[10px] text-gray-500 text-center mb-1">Глубина сцены (HRTF Z-axis)</div>
+                <input type="range" id="slider-z" min="-100" max="100" value="0">
+            </div>
+
+            <!-- 5. Компенсация и громкость -->
+            <div class="p-3 bg-gray-800/50 rounded-xl border border-gray-700 space-y-3">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs text-gray-300 font-medium">Авто-компенсация расстояния</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="toggle-autogain" class="sr-only peer" checked>
+                        <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+                    </label>
+                </div>
+                <div class="space-y-1">
+                    <div class="flex justify-between text-[10px] font-medium text-gray-400 uppercase">
+                        <span>Громкость</span>
+                        <span class="text-white font-mono" id="val-vol">100%</span>
+                    </div>
+                    <input type="range" id="slider-vol" min="0" max="200" value="100" class="h-1">
+                </div>
+            </div>
+
+            <div class="flex justify-center pt-2">
+                <button id="btn-reset" class="px-5 py-3 bg-gray-800 hover:bg-gray-700 rounded-xl text-sm font-medium text-gray-300 transition-colors border border-gray-700 w-full">
+                    Сбросить всё в центр
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-2xl text-center space-y-5">
+            
+            <div>
+                <label for="audio-upload" class="cursor-pointer group flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-600 rounded-2xl hover:border-blue-500 bg-gray-800/30 transition-all active:bg-gray-800">
+                    <svg class="w-10 h-10 text-blue-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg>
+                    <span class="text-base font-medium text-gray-200" id="file-name">Выбрать трек</span>
+                    <span class="text-xs text-gray-500 mt-1">.mp3, .wav, .m4a</span>
+                    <input id="audio-upload" type="file" accept="audio/*, audio/mpeg, .mp3, .wav, .m4a" class="hidden" />
+                </label>
+            </div>
+
+            <div id="status-msg" class="text-sm text-gray-400 h-5 font-medium transition-colors">Ожидание аудиофайла...</div>
+
+            <div class="flex justify-center gap-3">
+                <button id="btn-play" disabled class="flex-1 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 disabled:bg-gray-800 text-white font-semibold py-4 px-2 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path></svg>
+                    Play
+                </button>
+                <button id="btn-pause" disabled class="flex-1 bg-gray-800 hover:bg-gray-700 active:bg-gray-600 disabled:opacity-50 disabled:text-gray-600 text-white font-semibold py-4 px-2 rounded-xl transition-all flex items-center justify-center gap-2 border border-gray-700">
+                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
+                    Pause
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const ui = {
+            bal: { slider: document.getElementById('slider-balance'), val: document.getElementById('val-balance') },
+            scn: { slider: document.getElementById('slider-scene'), val: document.getElementById('val-scene') },
+            y:   { slider: document.getElementById('slider-y'), val: document.getElementById('val-y') },
+            z:   { slider: document.getElementById('slider-z'), val: document.getElementById('val-z') },
+            reset: document.getElementById('btn-reset'),
+            fileInput: document.getElementById('audio-upload'),
+            fileName: document.getElementById('file-name'),
+            play: document.getElementById('btn-play'),
+            pause: document.getElementById('btn-pause'),
+            status: document.getElementById('status-msg')
+        };
+
+        // Web Audio Variables
+        let audioCtx = null;
+        let audioElement = null;
+        let sourceNode = null;
+        let splitter = null;
+        let delayL = null;
+        let delayR = null;
+        let merger = null;
+        let stereoPanner = null;
+        let hrtfPanner = null;
+        let analyser = null;
+        let makeupGain = null;
+        let masterGain = null;
+        let isGraphInitialized = false;
+        let animationFrameId = null;
+
+        // Постоянная сглаживания
+        const SMOOTH_CONSTANT = 0.05;
+
+        // Инициализация аудио графа
+        function initAudioGraph() {
+            if (isGraphInitialized) return;
+            
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContextClass();
+            
+            audioElement = new Audio();
+            audioElement.loop = true;
+            
+            // MediaElementSource -> Splitter -> Delay -> Merger -> StereoPanner -> PannerNode (HRTF) -> Destination
+            sourceNode = audioCtx.createMediaElementSource(audioElement);
+            
+            splitter = audioCtx.createChannelSplitter(2);
+            delayL = audioCtx.createDelay(1.0);
+            delayR = audioCtx.createDelay(1.0);
+            merger = audioCtx.createChannelMerger(2);
+            
+            stereoPanner = audioCtx.createStereoPanner();
+            
+            hrtfPanner = audioCtx.createPanner();
+            hrtfPanner.panningModel = 'HRTF';
+            hrtfPanner.distanceModel = 'inverse';
+            hrtfPanner.refDistance = 1;
+            hrtfPanner.maxDistance = 10000;
+            
+            // Настройка слушателя в центре
+            const listener = audioCtx.listener;
+            if (listener.positionX) {
+                listener.positionX.value = 0; listener.positionY.value = 0; listener.positionZ.value = 0;
+                listener.forwardX.value = 0; listener.forwardY.value = 0; listener.forwardZ.value = -1;
+                listener.upX.value = 0; listener.upY.value = 1; listener.upZ.value = 0;
+            } else {
+                listener.setPosition(0, 0, 0);
+                listener.setOrientation(0, 0, -1, 0, 1, 0);
+            }
+
+            // Роутинг
+            sourceNode.connect(splitter);
+            
+            splitter.connect(delayL, 0); // Левый канал в левый Delay
+            splitter.connect(delayR, 1); // Правый канал в правый Delay
+            
+            delayL.connect(merger, 0, 0); // Из DelayL обратно в левый
+            delayR.connect(merger, 0, 1); // Из DelayR обратно в правый
+            
+            makeupGain = audioCtx.createGain();
+            masterGain = audioCtx.createGain();
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+
+            merger.connect(stereoPanner);
+            stereoPanner.connect(hrtfPanner);
+            
+            hrtfPanner.connect(makeupGain);
+            makeupGain.connect(masterGain);
+            masterGain.connect(analyser);
+            analyser.connect(audioCtx.destination);
+            
+            isGraphInitialized = true;
+        }
+
+        function updateDSP() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            
+            // 1. Баланс (-100..100) -> pan (-1..1)
+            const balVal = parseFloat(ui.bal.slider.value);
+            ui.bal.val.innerText = balVal;
+            stereoPanner.pan.setTargetAtTime(balVal / 100, now, SMOOTH_CONSTANT);
+
+            // 2. Сцена L-R (Задержка до 5мс = 0.005с)
+            const scnVal = parseFloat(ui.scn.slider.value);
+            ui.scn.val.innerText = scnVal;
+            
+            if (scnVal < 0) {
+                // Сдвиг влево -> задерживаем правый динамик
+                delayL.delayTime.setTargetAtTime(0, now, SMOOTH_CONSTANT);
+                delayR.delayTime.setTargetAtTime((-scnVal / 100) * 0.005, now, SMOOTH_CONSTANT);
+            } else {
+                // Сдвиг вправо -> задерживаем левый динамик
+                delayL.delayTime.setTargetAtTime((scnVal / 100) * 0.005, now, SMOOTH_CONSTANT);
+                delayR.delayTime.setTargetAtTime(0, now, SMOOTH_CONSTANT);
+            }
+
+            // 3. Высота Y (-100..100) -> positionY (-10..10)
+            const yVal = parseFloat(ui.y.slider.value);
+            const mappedY = (yVal / 100) * 10;
+            ui.y.val.innerText = yVal;
+            
+            // 4. Глубина Z (-100..100) -> positionZ (-10..10)
+            // В Web Audio: -Z это вперед, +Z это назад
+            const zVal = parseFloat(ui.z.slider.value);
+            const mappedZ = (zVal / 100) * 10;
+            ui.z.val.innerText = zVal;
+
+            if (hrtfPanner.positionX) {
+                hrtfPanner.positionX.setTargetAtTime(0, now, SMOOTH_CONSTANT);
+                hrtfPanner.positionY.setTargetAtTime(mappedY, now, SMOOTH_CONSTANT);
+                hrtfPanner.positionZ.setTargetAtTime(mappedZ, now, SMOOTH_CONSTANT);
+            } else {
+                hrtfPanner.setPosition(0, mappedY, mappedZ);
+            }
+
+            const autoGainEnabled = document.getElementById('toggle-autogain').checked;
+            if (autoGainEnabled) {
+                // Уменьшаем естественное затухание (rolloff), чтобы звук не пропадал
+                hrtfPanner.rolloffFactor = 0.15; 
+                
+                // Добавляем плавный Makeup Gain (усиление) при отдалении (Y или Z)
+                const distance = Math.sqrt(mappedY*mappedY + mappedZ*mappedZ);
+                const targetGain = 1 + (distance * 0.08); // Мягкая компенсация
+                makeupGain.gain.setTargetAtTime(targetGain, now, SMOOTH_CONSTANT);
+            } else {
+                // Стандартное физическое затухание (строгое 3D)
+                hrtfPanner.rolloffFactor = 1.0; 
+                makeupGain.gain.setTargetAtTime(1, now, SMOOTH_CONSTANT);
+            }
+            
+            // Общая громкость
+            const volVal = parseFloat(document.getElementById('slider-vol').value);
+            document.getElementById('val-vol').innerText = volVal + '%';
+            masterGain.gain.setTargetAtTime(volVal / 100, now, SMOOTH_CONSTANT);
+        }
+
+        // Привязываем слушатели к ползункам
+        [ui.bal.slider, ui.scn.slider, ui.y.slider, ui.z.slider, document.getElementById('slider-vol')].forEach(slider => {
+            slider.addEventListener('input', updateDSP);
+        });
+        document.getElementById('toggle-autogain').addEventListener('change', updateDSP);
+
+        ui.reset.addEventListener('click', () => {
+            ui.bal.slider.value = 0;
+            ui.scn.slider.value = 0;
+            ui.y.slider.value = 0;
+            ui.z.slider.value = 0;
+            document.getElementById('slider-vol').value = 100;
+            document.getElementById('toggle-autogain').checked = true;
+            updateDSP();
+        });
+
+        ui.fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            let cleanName = file.name;
+            if (cleanName.length > 25) cleanName = cleanName.substring(0, 22) + '...';
+            ui.fileName.innerText = cleanName;
+
+            if (!isGraphInitialized) initAudioGraph();
+            
+            // Используем createObjectURL - работает мгновенно
+            audioElement.src = URL.createObjectURL(file);
+            
+            ui.status.innerText = "Готово. Нажмите Play";
+            ui.status.className = "text-sm h-5 font-medium transition-colors text-green-400";
+            
+            ui.play.disabled = false;
+            ui.pause.disabled = true;
+        });
+
+        ui.play.addEventListener('click', () => {
+            if (!audioCtx) initAudioGraph();
+            
+            // Разблокировка контекста для iOS Safari
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            audioElement.play().then(() => {
+                ui.play.disabled = true;
+                ui.pause.disabled = false;
+                ui.status.innerText = "Играет...";
+                ui.status.className = "text-sm h-5 font-medium transition-colors text-blue-400";
+                
+                // Применяем текущие позиции при старте
+                updateDSP();
+                // Запускаем анимацию
+                if(animationFrameId) cancelAnimationFrame(animationFrameId);
+                drawRadar();
+            }).catch(e => {
+                console.error(e);
+                ui.status.innerText = "Ошибка воспроизведения";
+            });
+        });
+
+        ui.pause.addEventListener('click', () => {
+            audioElement.pause();
+            ui.play.disabled = false;
+            ui.pause.disabled = true;
+            ui.status.innerText = "Пауза";
+            ui.status.className = "text-sm h-5 font-medium transition-colors text-gray-400";
+            if(animationFrameId) cancelAnimationFrame(animationFrameId);
+        });
+
+        function drawRadar() {
+            if (!analyser || ui.play.disabled === false) return; // Останавливаем, если на паузе
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteTimeDomainData(dataArray);
+
+            // Вычисляем громкость для силы пульсации
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+                const val = (dataArray[i] - 128) / 128;
+                sum += val * val;
+            }
+            const rms = Math.sqrt(sum / dataArray.length);
+            const pulseScale = 1 + (rms * 2.5); 
+
+            // Маппинг координат ползунков на радар
+            const balVal = parseFloat(ui.bal.slider.value); // -100 to 100
+            const zVal = parseFloat(ui.z.slider.value); // -100 (Вперед) to 100 (Назад)
+            const yVal = parseFloat(ui.y.slider.value); // -100 (Вниз) to 100 (Вверх)
+
+            const radarMaxRadius = 90; // Макс отклонение в пикселях
+            const radarX = (balVal / 100) * radarMaxRadius; 
+            const radarY = (zVal / 100) * radarMaxRadius; // Z-ось это верх/низ радара
+
+            // Цвет зависит от высоты (Y-оси)
+            let glowColor = 'rgba(16, 185, 129, 0.8)'; // Изумрудный (центр)
+            let dotColor = '#10b981';
+            
+            if (yVal > 15) { // Звук сверху - розовеет/краснеет
+                dotColor = '#ef4444'; glowColor = 'rgba(239, 68, 68, 0.8)';
+            } else if (yVal < -15) { // Звук снизу - синеет
+                dotColor = '#3b82f6'; glowColor = 'rgba(59, 130, 246, 0.8)';
+            }
+
+            const sourceDot = document.getElementById('sound-source');
+            if (sourceDot) {
+                // Размер точки немного меняется в зависимости от высоты
+                const baseSize = 12 + (yVal / 100 * 6); 
+                
+                sourceDot.style.width = `${baseSize}px`;
+                sourceDot.style.height = `${baseSize}px`;
+                sourceDot.style.backgroundColor = dotColor;
+                sourceDot.style.boxShadow = `0 0 ${15 * pulseScale}px ${glowColor}, 0 0 ${30 * pulseScale}px ${glowColor}`;
+                
+                // Перемещение
+                sourceDot.style.transform = `translate(${radarX}px, ${radarY}px) scale(${pulseScale})`;
+            }
+
+            animationFrameId = requestAnimationFrame(drawRadar);
+        }
+
+    </script>
+</body>
+</html>
